@@ -1,0 +1,14 @@
+# 忽略所有层级的 x64 构建目录
+x64/
+
+# 忽略所有层级的 Debug 构建目录
+Debug/
+
+# 忽略 Visual Studio tlog 文件/目录
+*.tlog
+*.tlog/
+
+# 常见 Visual Studio 临时文件
+.vs/
+*.user
+*.suo
