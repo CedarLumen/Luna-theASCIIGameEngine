@@ -11,11 +11,15 @@
 #define MAX_ELEMENTS 1000
 #define MAX_SPRITES 1000
 
+// 图像精灵渲染时是否在像素后补一个空格（让图像看起来宽松，文本保持紧凑）
+const bool IMAGE_SPACING = true;
+
 char SCREEN_CHAR_BUFFER[SCREEN_HEIGHT][SCREEN_WIDTH];
 struct RGBA {
 	unsigned char r; unsigned char g; unsigned char b; unsigned char a;
 };
 RGBA SCREEN_COLOR_BUFFER[SCREEN_HEIGHT][SCREEN_WIDTH];
+bool SCREEN_IS_TEXT[SCREEN_HEIGHT][SCREEN_WIDTH];
 struct Pixel { char c; RGBA color; };
 template<typename T>
 struct Dot2D { T x; T y; };
@@ -25,10 +29,14 @@ struct Sprite {
 	std::string name = "default";
 	unsigned int id = SPRITE_COUNT;
 	bool isVisible = 1;
+	bool isText = 0;
+	std::string text = "";
+	RGBA textColor = { 255, 255, 255, 255 };
 	Dot2D<int> position = { 0, 0 };
 	Dot2D<int> collisionBox = { 16, 16 };
 	Dot2D<int> pivot = { 0, 0 };
 	Dot2D<int> collisionPivot = { 0, 0 };
+	Dot2D<int> textPivot = { 0, 0 };
 	float rotation = 0.0f;
 	int width = 16;
 	int height = 16;
@@ -67,7 +75,33 @@ struct Sprite {
 				}
 				SCREEN_CHAR_BUFFER[screenY][screenX] = pixel.c;
 				SCREEN_COLOR_BUFFER[screenY][screenX] = pixel.color;
+				SCREEN_IS_TEXT[screenY][screenX] = 0; // 标记：图像来源
 			}
+		}
+	}
+	void setText(const std::string& t, RGBA color = { 255, 255, 255, 255 }) {
+		isText = 1;
+		text = t;
+		textColor = color;
+	}
+	void blitTextToScreen() {
+		int startX = position.x + textPivot.x;
+		int cx = startX;
+		int cy = position.y + textPivot.y;
+		for (size_t i = 0; i < text.size(); ++i) {
+			char ch = text[i];
+			if (ch == '\n') {          // 换行
+				cx = startX;
+				cy++;
+				continue;
+			}
+			if (ch == '\r') continue;  // 忽略 \r
+			if (cx >= 0 && cx < SCREEN_WIDTH && cy >= 0 && cy < SCREEN_HEIGHT) {
+				SCREEN_CHAR_BUFFER[cy][cx] = ch;
+				SCREEN_COLOR_BUFFER[cy][cx] = textColor;
+				SCREEN_IS_TEXT[cy][cx] = 1; // 标记：文本来源
+			}
+			cx++;
 		}
 	}
 };
@@ -124,31 +158,28 @@ void clearScreen() {
 		for (int x = 0; x < SCREEN_WIDTH; ++x) {
 			SCREEN_CHAR_BUFFER[y][x] = ' ';
 			SCREEN_COLOR_BUFFER[y][x] = { 0, 0, 0, 0 };
+			SCREEN_IS_TEXT[y][x] = 0;
 		}
 	}
 }
 
-// ============================================================
-// 真彩色渲染：整帧拼成一个字符串，只调用一次 WriteConsoleA
-// 要点：
-//   1. 帧首 \033[H 让光标归位（不清屏，不清屏就不会闪）
-//   2. 行尾 \033[0m 重置颜色 + \033[K 擦掉该行残留
-//   3. 最后一行绝不输出 \n，避免整屏向上滚动
-// ============================================================
 void renderScreen() {
 	static std::string out;
 	out.clear();
-	out.reserve(SCREEN_HEIGHT * SCREEN_WIDTH * 24 + 64);
+	out.reserve(SCREEN_HEIGHT * SCREEN_WIDTH * 32 + 64);
 
-	out += "\033[H";
+	out += "\033[H"; // 光标回左上角，不清屏
 
 	for (int y = 0; y < SCREEN_HEIGHT; ++y) {
 		int lr = -1, lg = -1, lb = -1;
 		for (int x = 0; x < SCREEN_WIDTH; ++x) {
 			RGBA c = SCREEN_COLOR_BUFFER[y][x];
 			char ch = SCREEN_CHAR_BUFFER[y][x];
+
 			if (c.a == 0) {
 				out += ' ';
+				// 图像区域即使在透明格也补一个空格，保证整行对齐
+				if (IMAGE_SPACING && !SCREEN_IS_TEXT[y][x]) out += ' ';
 				continue;
 			}
 			if (c.r != lr || c.g != lg || c.b != lb) {
@@ -159,32 +190,32 @@ void renderScreen() {
 				lr = c.r; lg = c.g; lb = c.b;
 			}
 			out += ch;
+			// 图像精灵像素后补一个空格，文本精灵不补
+			if (IMAGE_SPACING && !SCREEN_IS_TEXT[y][x]) out += ' ';
 		}
-		out += "\033[0m\033[K";
-		if (y + 1 < SCREEN_HEIGHT) out += '\n';
+		out += "\033[0m\033[K";                      // 重置颜色 + 擦到行尾
+		if (y + 1 < SCREEN_HEIGHT) out += '\n';      // 最后一行不换行，防滚动
 	}
-
 
 	DWORD written = 0;
 	WriteConsoleA(hConsole, out.data(), (DWORD)out.size(), &written, NULL);
 }
 
-
 void initConsole() {
 	hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
 
-
+	// 开启 VT 转义序列支持（真彩色、光标控制必须）
 	DWORD mode = 0;
 	GetConsoleMode(hConsole, &mode);
 	SetConsoleMode(hConsole, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
 
-
+	// 隐藏光标，消除光标跳动带来的闪烁感
 	CONSOLE_CURSOR_INFO cursorInfo;
 	GetConsoleCursorInfo(hConsole, &cursorInfo);
 	cursorInfo.bVisible = FALSE;
 	SetConsoleCursorInfo(hConsole, &cursorInfo);
 
-
+	// 清一次屏 + 光标归位
 	DWORD w = 0;
 	const char* reset = "\033[2J\033[H";
 	WriteConsoleA(hConsole, reset, (DWORD)strlen(reset), &w, NULL);
@@ -217,9 +248,31 @@ int blitSprite(int id) {
 		return -1;
 	}
 	if (sprites[id].isVisible) {
-		sprites[id].blitToScreen();
+		if (sprites[id].isText) {
+			sprites[id].blitTextToScreen();
+		}
+		else {
+			sprites[id].blitToScreen();
+		}
 	}
 	return 0;
+}
+int collisionCheck(int id1, int id2) {
+	if (id1 < 0 || id1 >= spriteCount || id2 < 0 || id2 >= spriteCount) {
+		std::cerr << "Error: Invalid sprite ID(s)" << std::endl;
+		return -1;
+	}
+	Sprite& s1 = sprites[id1];
+	Sprite& s2 = sprites[id2];
+	int left1 = s1.position.x + s1.collisionPivot.x;
+	int right1 = left1 + s1.collisionBox.x;
+	int top1 = s1.position.y + s1.collisionPivot.y;
+	int bottom1 = top1 + s1.collisionBox.y;
+	int left2 = s2.position.x + s2.collisionPivot.x;
+	int right2 = left2 + s2.collisionBox.x;
+	int top2 = s2.position.y + s2.collisionPivot.y;
+	int bottom2 = top2 + s2.collisionBox.y;
+	return !(left1 >= right2 || right1 <= left2 || top1 >= bottom2 || bottom1 <= top2);
 }
 
 int main() {
@@ -227,16 +280,28 @@ int main() {
 
 	int iddog = addSprite("dog");
 	loadPicture("dog.pix", sprites[iddog]);
+
 	int idcat = addSprite("cat");
-	loadPicture("cat.pix", sprites[idcat]);
+	loadPicture("card.pix", sprites[idcat]);
+
+	// 文本精灵示例
+	int idhud = addSprite("hud");
+	sprites[idhud].position = { 2, 1 };
+	sprites[idhud].setText(
+		"=== Console Sprite Demo ===\n"
+		"Dog at (10,10), Cat at (40,20)\n"
+		"Press ESC to quit.",
+		{ 255, 255, 0, 255 }              // 黄色文本
+	);
 
 	while (true) {
 		system("cls");
 		clearScreen();
 		blitSprite(iddog);
 		blitSprite(idcat);
-		renderScreen();                   
-		Sleep(16);                               
+		blitSprite(idhud);
+		renderScreen();
+		Sleep(16);
 	}
 
 	return 0;
