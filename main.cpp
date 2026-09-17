@@ -4,6 +4,7 @@
 #include <vector>
 #include <fstream>
 #include <sstream>
+#include <Windows.h>
 #define PI 3.14159265358979323846
 #define SCREEN_WIDTH 40
 #define SCREEN_HEIGHT 30
@@ -32,6 +33,37 @@ struct Sprite {
 	}
 	~Sprite() {
 		delete[] pixels;
+	}
+    void setPixel(int x, int y, char c, RGBA color) {
+        if (x < 0 || x >= width || y < 0 || y >= height) {
+            std::cerr << "Error: Pixel coordinates out of bounds" << std::endl;
+            return;
+        }
+        pixels[y * width + x] = { c, color };
+	}
+    void setPixel(int index, char c, RGBA color) {
+        if (index < 0 || index >= width * height) {
+            std::cerr << "Error: Pixel index out of bounds" << std::endl;
+            return;
+        }
+        pixels[index] = { c, color };
+	}
+    void blitToScreen() {
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                int screenX = position.x + x;
+                int screenY = position.y + y;
+                if (screenX < 0 || screenX >= SCREEN_WIDTH || screenY < 0 || screenY >= SCREEN_HEIGHT) {
+                    continue; // Skip pixels outside the screen bounds
+                }
+                if (pixels[y * width + x].color.a == 0) {
+                    continue; // Skip transparent pixels
+				}
+                Pixel& pixel = pixels[y * width + x];
+                SCREEN_CHAR_BUFFER[screenY][screenX] = pixel.c;
+                SCREEN_COLOR_BUFFER[screenY][screenX] = pixel.color;
+            }
+        }
 	}
 };
 
@@ -79,10 +111,28 @@ void loadPicture(const std::string& filename, Sprite& sprite) {
             << ", loaded " << index << " / " << total << std::endl;
     }
 }
+void clearScreen() {
+    for (int y = 0; y < SCREEN_HEIGHT; ++y) {
+        for (int x = 0; x < SCREEN_WIDTH; ++x) {
+            SCREEN_CHAR_BUFFER[y][x] = ' ';
+            SCREEN_COLOR_BUFFER[y][x] = { 0, 0, 0, 0 };
+        }
+    }
+}
+void renderScreen() {
+    for (int y = 0; y < SCREEN_HEIGHT; ++y) {
+        for (int x = 0; x < SCREEN_WIDTH; ++x) {
+            std::cout << SCREEN_CHAR_BUFFER[y][x];
+        }
+        std::cout << std::endl;
+    }
+}
 
 int main() {
 	Sprite dog;
 	dog.name = "Dog";
 	loadPicture("dog.pix", dog);
+	dog.blitToScreen();
+	renderScreen();
 	std::cout << dog.id << std::endl;
 }

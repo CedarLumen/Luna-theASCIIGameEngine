@@ -23,6 +23,11 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="dog.pix" />
+    <None Include="PixFileEditor.html">
+      <Filter>资源文件</Filter>
+    </None>
+    <None Include="dog.pix">
+      <Filter>资源文件</Filter>
+    </None>
   </ItemGroup>
 </Project>
