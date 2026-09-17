@@ -29,5 +29,8 @@
     <None Include="dog.pix">
       <Filter>资源文件</Filter>
     </None>
+    <None Include="cat.pix">
+      <Filter>资源文件</Filter>
+    </None>
   </ItemGroup>
 </Project>
