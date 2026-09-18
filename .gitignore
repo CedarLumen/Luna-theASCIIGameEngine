@@ -12,3 +12,7 @@ Debug/
 .vs/
 *.user
 *.suo
+
+.gitignore
+
+.backup/

@@ -52,12 +52,6 @@ bool isKeyReleased(int vKey) {
     return released;
 }
 
-// ============================================================
-// 屏幕缓冲区：宽度为逻辑宽度的两倍
-//   - 图像精灵：每个逻辑像素占 2 个缓冲区列（字符格 + 空格格）
-//   - 文本精灵：每个字符占 1 个缓冲区列（字符紧挨着，无间距）
-// 两者共用同一逻辑坐标 position.x，因此位置一一对应、完全对齐。
-// ============================================================
 #define SCREEN_BUFFER_WIDTH (SCREEN_WIDTH * 2)
 
 char SCREEN_CHAR_BUFFER[SCREEN_HEIGHT][SCREEN_BUFFER_WIDTH];
@@ -70,6 +64,9 @@ RGBA SCREEN_COLOR_BUFFER[SCREEN_HEIGHT][SCREEN_BUFFER_WIDTH];
 struct Pixel { char c; RGBA color; };
 template<typename T>
 struct Dot2D { T x; T y; };
+template<typename T>
+struct Dot3D { T x; T y; T z; };
+struct Triangle { Dot2D<int> p1; Dot2D<int> p2; Dot2D<int> p3; RGBA color; };
 
 int SPRITE_COUNT = 0;
 struct Sprite {
@@ -77,7 +74,11 @@ struct Sprite {
     unsigned int id = SPRITE_COUNT;
     bool isVisible = 1;
     bool isText = 0;
+	int isShape = 0; // 0: none, 1: triangle, 2: rectangle, 3: line, 4: circle
+	long long group = 0;
     std::string text = "";
+	Triangle shape = { {0, 0}, {0, 0}, {0, 0}, {255, 255, 255, 255} };
+	char shapeChar = '#';
     RGBA textColor = { 255, 255, 255, 255 };
     Dot2D<int> position = { 0, 0 };
     Dot2D<int> collisionBox = { 16, 16 };
@@ -112,7 +113,6 @@ struct Sprite {
     }
 
     // 图像精灵：每个像素在缓冲区里占 2 列
-    // 图像精灵：每个像素在缓冲区里占 2 列
     void blitToScreen() {
         for (int y = 0; y < height; ++y) {
             for (int x = 0; x < width; ++x) {
@@ -127,17 +127,56 @@ struct Sprite {
 
                 int bufX = logicalX * 2;
 
-                // 字符格：正常写入（图像覆盖一切）
                 SCREEN_CHAR_BUFFER[logicalY][bufX] = pixel.c;
                 SCREEN_COLOR_BUFFER[logicalY][bufX] = pixel.color;
 
-                // 间距格：仅当该格为空时才写空格，绝不覆盖已有文本
                 if (SCREEN_COLOR_BUFFER[logicalY][bufX + 1].a == 0) {
                     SCREEN_CHAR_BUFFER[logicalY][bufX + 1] = ' ';
                     SCREEN_COLOR_BUFFER[logicalY][bufX + 1] = { 0, 0, 0, 0 };
                 }
             }
         }
+    }
+
+    void blitLineToScreen() {
+        if (shape.color.a == 0) return;
+
+        int x0 = shape.p1.x + position.x;
+        int y0 = shape.p1.y + position.y;
+        int x1 = shape.p2.x + position.x;
+        int y1 = shape.p2.y + position.y;
+
+        int dx = abs(x1 - x0);
+        int dy = abs(y1 - y0);
+        int sx = (x0 < x1) ? 1 : -1;
+        int sy = (y0 < y1) ? 1 : -1;
+        int err = dx - dy;
+
+        while (true) {
+            if (x0 >= 0 && x0 < SCREEN_WIDTH &&
+                y0 >= 0 && y0 < SCREEN_HEIGHT) {
+                int bufX = x0 * 2;   // 与图像精灵一致：每像素占 2 列，保证显示比例
+                SCREEN_CHAR_BUFFER[y0][bufX] = shapeChar;
+                SCREEN_COLOR_BUFFER[y0][bufX] = shape.color;
+
+                if (SCREEN_COLOR_BUFFER[y0][bufX + 1].a == 0) {
+                    SCREEN_CHAR_BUFFER[y0][bufX + 1] = ' ';
+                    SCREEN_COLOR_BUFFER[y0][bufX + 1] = { 0, 0, 0, 0 };
+                }
+            }
+            if (x0 == x1 && y0 == y1) break;
+            int e2 = 2 * err;
+            if (e2 > -dy) { err -= dy; x0 += sx; }
+            if (e2 < dx) { err += dx; y0 += sy; }
+        }
+    }
+
+    void setLine(int x1, int y1, int x2, int y2, RGBA color = { 255, 255, 255, 255 }, char c = '#') {
+        isShape = 3;                       // 3 = line
+        shape.p1 = { x1, y1 };
+        shape.p2 = { x2, y2 };
+        shape.color = color;
+		shapeChar = c;
     }
 
     void setText(const std::string& t, RGBA color = { 255, 255, 255, 255 }) {
@@ -293,6 +332,9 @@ int blitSprite(int id) {
     if (sprites[id].isVisible) {
         if (sprites[id].isText) {
             sprites[id].blitTextToScreen();
+        }
+        else if (sprites[id].isShape == 3) {   // 新增：线
+            sprites[id].blitLineToScreen();
         }
         else {
             sprites[id].blitToScreen();
